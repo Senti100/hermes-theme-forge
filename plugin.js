@@ -39,7 +39,7 @@ const useThemeCompat = typeof sdk.useTheme === 'function' ? sdk.useTheme : () =>
 const PLUGIN_ID = 'theme-forge';
 const AREA_THEMES = 'themes';
 const AREA_ROUTES = 'routes';
-const AREA_PANES = 'panes';
+const AREA_SIDEBAR_NAV = 'sidebar.nav';
 const ROUTE_PATH = '/theme-forge';
 
 const LS_PROFILE_THEMES = 'hermes-desktop-profile-themes-v1';
@@ -1202,7 +1202,7 @@ function recordKey(record) {
   return `${s.kind ?? '?'}:${s.file ?? s.dir ?? s.key ?? record.theme?.name ?? Math.random()}`;
 }
 
-function Editor({ record, appliedName, onNotify, onOpenFullPage, embedded }) {
+function Editor({ record, appliedName, onNotify }) {
   const initial = useMemo(() => deepCopy(record.raw ?? record.theme ?? {}), [record]);
   const [draft, setDraft] = useState(initial);
   const [tab, setTab] = useState('Colors');
@@ -1342,9 +1342,6 @@ function Editor({ record, appliedName, onNotify, onOpenFullPage, embedded }) {
       confirmDelete
         ? h('button', { type: 'button', className: BTN, style: { borderColor: 'var(--dt-destructive, #e0675f)', color: 'var(--dt-destructive, #e0675f)' }, disabled: !!busy, onClick: doDelete }, busy === 'delete' ? 'Deleting…' : 'Confirm delete')
         : h('button', { type: 'button', className: BTN, onClick: () => setConfirmDelete(true), disabled: !!busy }, 'Delete'),
-      embedded
-        ? h('button', { type: 'button', className: BTN, onClick: onOpenFullPage }, 'Open full page')
-        : null,
     ),
     isDirty
       ? h('div', { className: 'rounded-md border border-dashed border-border px-2 py-1 text-[0.6875rem] text-muted-foreground' }, 'Unsaved changes — Save to keep, Preview draft to try, or revert by re-selecting the pack.')
@@ -1373,12 +1370,28 @@ function Editor({ record, appliedName, onNotify, onOpenFullPage, embedded }) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Manager (pane + route)                                              */
+/* Manager (route page + route tile)                                   */
 /* ------------------------------------------------------------------ */
 
+/** Track container width so the manager stays usable in narrow route tiles. */
+function useCompactLayout(boundary = 640) {
+  const ref = React.useRef(null);
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect?.width ?? 0;
+      setCompact(width > 0 && width < boundary);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [boundary]);
+  return [ref, compact];
+}
+
 const TEMPLATE_PACK = {
-  name: 'my-theme',
-  label: 'My Theme',
+  name: 'my-theme',  label: 'My Theme',
   description: 'A Theme Forge pack — edit name/label, then colors, wallpaper and blur.',
   colors: Object.fromEntries(COLOR_KEYS.map((key, index) => [
     key,
@@ -1404,10 +1417,11 @@ const TEMPLATE_PACK = {
 };
 TEMPLATE_PACK.darkColors = deepCopy(TEMPLATE_PACK.colors);
 
-function Manager({ embedded = false }) {
+function Manager() {
   const packs = useValue(packsAtom);
   const status = useValue(statusAtom);
   const themeCtx = useThemeCompat();
+  const [rootRef, compact] = useCompactLayout();
   const [selectedKey, setSelectedKey] = useState(null);
   const [busy, setBusy] = useState(null);
   const [notice, setNotice] = useState(null);
@@ -1496,7 +1510,7 @@ function Manager({ embedded = false }) {
     await openPacksFolder();
   });
 
-  return h('div', { className: cn('flex min-h-0 flex-1 flex-col gap-3', embedded ? 'p-2' : 'p-4') },
+  return h('div', { ref: rootRef, className: 'flex min-h-0 flex-1 flex-col gap-3 p-3' },
     h('div', { className: 'flex flex-wrap items-center gap-2' },
       h('div', { className: 'mr-auto flex min-w-0 flex-col' },
         h('div', { className: 'flex items-center gap-2' },
@@ -1522,7 +1536,7 @@ function Manager({ embedded = false }) {
             : { borderColor: 'var(--dt-ring, var(--theme-primary))', color: 'var(--theme-primary)' },
         }, notice.body ?? notice.title ?? '')
       : null,
-    h('div', { className: cn('grid min-h-0 flex-1 gap-3', embedded ? 'grid-cols-1' : 'grid-cols-[minmax(15rem,18rem)_1fr]') },
+    h('div', { className: cn('grid min-h-0 flex-1 gap-3', compact ? 'grid-cols-1' : 'grid-cols-[minmax(0,15rem)_1fr]') },
       h('div', { className: 'flex min-h-0 flex-col gap-2 overflow-y-auto pr-1' },
         packs.length === 0 && status.phase !== 'loading'
           ? h('div', { className: 'rounded-md border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground' },
@@ -1561,8 +1575,6 @@ function Manager({ embedded = false }) {
               record: selected,
               appliedName,
               onNotify: notify,
-              embedded,
-              onOpenFullPage: () => hostNavigate(),
             }),
           )
         : h('div', { className: cn(CARD, 'grid place-items-center p-8 text-xs text-muted-foreground') }, 'Select a pack to edit it.'),
@@ -1570,21 +1582,8 @@ function Manager({ embedded = false }) {
   );
 }
 
-function hostNavigate() {
-  try {
-    const sdkHost = globalThis.__HERMES_PLUGIN_SDK__?.host;
-    sdkHost?.navigate?.(ROUTE_PATH);
-  } catch {
-    /* ignore */
-  }
-}
-
-function ManagerPane() {
-  return h(Manager, { embedded: true });
-}
-
 function ManagerRoute() {
-  return h(Manager, { embedded: false });
+  return h(Manager);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1608,24 +1607,30 @@ export default {
       ctxRef = null;
     });
 
-    // Dockable manager pane (right of the workspace, like the cron pane).
+    // NOTE: deliberately NO docked pane. In current Hermes Desktop builds,
+    // closing a plugin-sourced pane disables the entire plugin (the pane
+    // close handler treats "plugin pane closed" as "user wants it gone").
+    // The sidebar entry + route below are the supported surfaces: route
+    // tiles get their own close handlers and never touch plugin state.
+
+    // Persistent "Theme Forge" row in the sidebar (paintbrush icon).
+    // Clicking navigates to the manager; the row's split button opens it
+    // as a closable tile pane.
     try {
       context.register({
-        id: 'manager-pane',
-        area: AREA_PANES,
-        title: 'Theme Forge',
+        id: 'manager-nav',
+        area: AREA_SIDEBAR_NAV,
         data: {
-          placement: 'main',
-          width: '460px',
-          dock: { pane: 'workspace', pos: 'right' },
+          path: ROUTE_PATH,
+          label: 'Theme Forge',
+          codicon: 'paintbrush',
         },
-        render: () => h(ManagerPane),
       });
     } catch {
-      /* pane registration is best-effort; the route remains */
+      /* ignore */
     }
 
-    // Full-page manager at /theme-forge.
+    // Full-page manager at /theme-forge (also the tile renderer).
     try {
       context.register({
         id: 'manager',
