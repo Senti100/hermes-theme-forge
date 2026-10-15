@@ -19,7 +19,7 @@ modifications. Everything is user-owned: no `app.asar` repacking, and the packs 
 │ theme-forge plugin                                          │
 │  1. scans pack sources → validates → resolves images        │
 │  2. register({area:'themes', id, data: theme})  per pack    │
-│  3. manager pane + /theme-forge route (import/edit/apply)   │
+│  3. sidebar row + /theme-forge route (import/edit/apply)    │
 │  4. boot self-heal re-applies a persisted pack theme        │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -36,9 +36,12 @@ Copy (or `git clone`) this folder into the desktop plugins root and restart Herm
 The folder must contain `plugin.js` at its root (it does). Then:
 
 1. Restart Hermes Desktop.
-2. **Settings → Plugins** → *Theme Forge* should be listed and enabled.
-3. The **Theme Forge** pane docks next to your workspace; the full manager also lives at
-   **`/theme-forge`** (the pane's *Open full page* button navigates there).
+2. **Settings → Plugins** → *Theme Forge* should be listed and **enabled**
+   (if you previously closed an old Theme Forge *pane*, the app persisted a
+   "disabled" decision — flip the toggle back on once).
+3. A **Theme Forge** row with a paintbrush icon appears in the sidebar.
+   Click it to open the manager; the row's *open-in-split* button docks it
+   as a closable tile. The full page also lives at **`/theme-forge`**.
 
 To distribute updates, push the folder to a git repo and install via
 **Settings → Plugins → install from git URL** — the built-in installer accepts any repo
@@ -119,6 +122,18 @@ Folders/files starting with `.` or `_` are ignored (`_template/` is a reference 
 - **Apply** saves (if dirty) then applies through the app pipeline (`requestTheme`) — title-bar
   tint, boot background and glass translucency all stay consistent.
 - **Save as copy / Export… / Reveal / Delete** for pack management.
+- The layout is responsive: full two-column on the page, single-column in a
+  narrow split tile.
+
+### Why there's no docked pane
+
+In current Hermes Desktop builds, **closing a plugin-sourced pane disables the
+entire plugin** — the pane close handler treats a closed plugin pane as
+"the user wants this plugin gone" (it persists the decision and shows a
+"plugin disabled" toast). So Theme Forge deliberately registers no pane.
+The sidebar row + `/theme-forge` route are the supported surfaces: the
+sidebar row is a persistent entry point, and route tiles register their own
+close handlers, so closing a tile never touches plugin state.
 
 ## How it works (app internals, 0.17.0)
 
