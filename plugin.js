@@ -169,7 +169,145 @@ function parseFilter(str) {
 
 /** Values the app passes through untouched inside url("...") / as-is. */
 function isPassthroughImageRef(value) {
-  return /^(data:|https?:|url\(|linear-gradient\(|radial-gradient\(|conic-gradient\()/i.test(String(value ?? '').trim());
+  return /^(none|data:|https?:|url\(|linear-gradient\(|radial-gradient\(|conic-gradient\()/i.test(String(value ?? '').trim());
+}
+
+/* ------------------------------------------------------------------ */
+/* Wallpaper engine                                                    */
+/*                                                                     */
+/* Upstream Hermes Desktop has no background-image/blur support — the  */
+/* `--dt-wallpaper-*` engine shipped only in a local fork. This section*/
+/* reimplements it entirely plugin-side: one injected stylesheet plus  */
+/* variables synced to whichever pack theme is currently applied.      */
+/* ------------------------------------------------------------------ */
+
+const WALLPAPER_STYLE_ID = 'theme-forge-wallpaper-css';
+
+const WALLPAPER_CSS = `
+:root{--dt-wallpaper-image:none;--dt-wallpaper-position:center center;--dt-wallpaper-size:cover;--dt-wallpaper-opacity:0;--dt-wallpaper-overlay:transparent;--dt-wallpaper-filter:none;--dt-wallpaper-front-filter:none;--dt-wallpaper-scale:1}
+:root[data-hermes-wallpaper=true] #root{isolation:isolate}
+:root[data-hermes-wallpaper=true] #root:before,:root[data-hermes-wallpaper=true] #root:after{content:"";pointer-events:none;position:fixed;inset:0}
+:root[data-hermes-wallpaper=true] #root:before{z-index:0;background-image:var(--dt-wallpaper-image);background-position:var(--dt-wallpaper-position);background-repeat:no-repeat;background-size:var(--dt-wallpaper-size);filter:var(--dt-wallpaper-filter);opacity:var(--dt-wallpaper-opacity);transform:scale(var(--dt-wallpaper-scale));transform-origin:50%}
+:root[data-hermes-wallpaper=true] #root:after{z-index:0;background:var(--dt-wallpaper-overlay);-webkit-backdrop-filter:var(--dt-wallpaper-front-filter);backdrop-filter:var(--dt-wallpaper-front-filter)}
+:root[data-hermes-wallpaper=true] #root>*{z-index:1;position:relative}
+`;
+
+/** Pack surface keys → the CSS variables the app chrome consumes. */
+const SURFACE_VAR_MAP = [
+  ['backgroundSurface', ['--dt-background', '--ui-bg-chrome']],
+  ['chatSurface', ['--ui-chat-surface-background']],
+  ['editorSurface', ['--ui-editor-surface-background', '--ui-bg-editor']],
+  ['sidebarSurface', ['--ui-sidebar-surface-background', '--ui-bg-sidebar']],
+  ['cardSurface', ['--dt-card', '--ui-bg-card']],
+  ['popoverSurface', ['--dt-popover', '--ui-bg-elevated']],
+  ['bubbleSurface', ['--ui-chat-bubble-background', '--ui-chat-bubble-opaque-background']],
+];
+
+const WALLPAPER_VAR_NAMES = [
+  '--dt-wallpaper-image', '--dt-wallpaper-position', '--dt-wallpaper-size',
+  '--dt-wallpaper-opacity', '--dt-wallpaper-overlay', '--dt-wallpaper-filter',
+  '--dt-wallpaper-scale', '--dt-wallpaper-front-filter',
+];
+
+let wallpaperObserver = null;
+let wallpaperSyncTimer = null;
+
+function injectWallpaperCss() {
+  if (typeof document === 'undefined') return;
+  try {
+    if (document.getElementById(WALLPAPER_STYLE_ID)) return;
+    const style = document.createElement('style');
+    style.id = WALLPAPER_STYLE_ID;
+    style.textContent = WALLPAPER_CSS;
+    document.head.appendChild(style);
+  } catch {
+    /* never break the host */
+  }
+}
+
+function wrapImageValue(value) {
+  const s = String(value ?? '').trim();
+  if (!s || isPassthroughImageRef(s)) return s || 'none';
+  return `url("${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}")`;
+}
+
+function setWallpaperVars(wallpaper) {
+  const rootStyle = document.documentElement.style;
+  rootStyle.setProperty('--dt-wallpaper-image', wrapImageValue(wallpaper.image ?? 'none'));
+  rootStyle.setProperty('--dt-wallpaper-position', wallpaper.position ?? 'center center');
+  rootStyle.setProperty('--dt-wallpaper-size', wallpaper.size ?? 'cover');
+  rootStyle.setProperty('--dt-wallpaper-opacity', String(wallpaper.opacity ?? 1));
+  rootStyle.setProperty('--dt-wallpaper-overlay', wallpaper.overlay ?? 'transparent');
+  rootStyle.setProperty('--dt-wallpaper-filter', wallpaper.filter ?? 'none');
+  rootStyle.setProperty('--dt-wallpaper-scale', String(wallpaper.scale ?? 1));
+  rootStyle.setProperty('--dt-wallpaper-front-filter', wallpaper.frontFilter ?? 'none');
+  for (const [surfaceKey, varNames] of SURFACE_VAR_MAP) {
+    const value = wallpaper[surfaceKey];
+    for (const varName of varNames) {
+      if (value) rootStyle.setProperty(varName, String(value));
+      else rootStyle.removeProperty(varName);
+    }
+  }
+}
+
+function clearWallpaperVars() {
+  const rootStyle = document.documentElement.style;
+  for (const varName of WALLPAPER_VAR_NAMES) rootStyle.removeProperty(varName);
+  for (const [, varNames] of SURFACE_VAR_MAP) {
+    for (const varName of varNames) rootStyle.removeProperty(varName);
+  }
+}
+
+/** Match the applied theme name to a published pack (mode suffix tolerant). */
+function findPackForAppliedTheme(appliedName) {
+  if (!appliedName) return null;
+  const records = packsAtom.get?.() ?? [];
+  return (
+    records.find((r) => r.theme?.name === appliedName) ??
+    records.find((r) => r.theme && appliedName.startsWith(`${r.theme.name}-`)) ??
+    null
+  );
+}
+
+/** Point the wallpaper layers at the currently applied pack theme (or clear). */
+function syncWallpaperToAppliedTheme() {
+  if (typeof document === 'undefined') return;
+  try {
+    const applied = document.documentElement?.dataset?.hermesTheme ?? '';
+    const record = findPackForAppliedTheme(applied);
+    const wall = record?.theme?.wallpaper;
+    if (wall && typeof wall === 'object') {
+      setWallpaperVars(wall);
+      document.documentElement.dataset.hermesWallpaper = 'true';
+    } else {
+      clearWallpaperVars();
+      delete document.documentElement.dataset.hermesWallpaper;
+    }
+  } catch {
+    /* never break the host */
+  }
+}
+
+function scheduleWallpaperSync() {
+  if (wallpaperSyncTimer) return;
+  wallpaperSyncTimer = setTimeout(() => {
+    wallpaperSyncTimer = null;
+    syncWallpaperToAppliedTheme();
+  }, 60);
+}
+
+/** Re-sync whenever the app re-applies the theme (it writes inline styles/attrs). */
+function startWallpaperObserver() {
+  if (wallpaperObserver || typeof document === 'undefined' || typeof MutationObserver === 'undefined') return;
+  try {
+    wallpaperObserver = new MutationObserver(() => scheduleWallpaperSync());
+    wallpaperObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-hermes-theme', 'data-hermes-mode', 'style'],
+    });
+  } catch {
+    /* never break the host */
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -508,6 +646,9 @@ function publishPacks(records) {
       /* registry rejects duplicates — harmless, first entry stays */
     }
   }
+  // Wallpaper layers follow the applied theme; re-sync after any republish
+  // (pack edits, additions, removals).
+  scheduleWallpaperSync();
 }
 
 /** Register a throwaway theme so drafts can be previewed before saving. */
@@ -823,6 +964,9 @@ export const __engine = {
   getPersistedThemeName,
   applyThemeName,
   readAppliedTheme,
+  syncWallpaperToAppliedTheme,
+  setWallpaperVars,
+  clearWallpaperVars,
   pickOpenPath,
   pickSavePath,
   describeSource,
@@ -1605,6 +1749,20 @@ export default {
       disposeEntries();
       disposeDrafts();
       ctxRef = null;
+      // Remove the wallpaper layers + observer so disabling the plugin
+      // restores the stock look immediately.
+      try {
+        wallpaperObserver?.disconnect();
+      } catch {
+        /* ignore */
+      }
+      wallpaperObserver = null;
+      try {
+        clearWallpaperVars();
+        delete document.documentElement.dataset.hermesWallpaper;
+      } catch {
+        /* ignore */
+      }
     });
 
     // NOTE: deliberately NO docked pane. In current Hermes Desktop builds,
@@ -1642,6 +1800,13 @@ export default {
     } catch {
       /* ignore */
     }
+
+    // Wallpaper engine: stylesheet + theme-change observer. The wallpaper
+    // schema (background image + blur + glass surfaces) is plugin-owned —
+    // upstream builds have no native support for it.
+    injectWallpaperCss();
+    startWallpaperObserver();
+    scheduleWallpaperSync();
 
     // Load packs and publish themes (async, error-surfaced via statusAtom).
     (async () => {
