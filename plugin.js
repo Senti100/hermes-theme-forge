@@ -465,13 +465,33 @@ async function resolveImageRef(ref, baseDir) {
 /* Pack discovery                                                      */
 /* ------------------------------------------------------------------ */
 
-/** Resolve this plugin's own folder by scanning the desktop plugins root. */
+/** True when `dir` holds this plugin's `plugin.js` (identified by our id). */
+async function dirContainsPluginId(dir) {
+  const d = desktop();
+  if (!d?.readFileText || !dir) return false;
+  try {
+    const res = await d.readFileText(`${dir.replace(/\/+$/, '')}/plugin.js`);
+    return !res.binary && !res.truncated && new RegExp(`["']${PLUGIN_ID}["']`).test(res.text);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolve this plugin's own folder by scanning the desktop plugins root.
+ * The cached path is re-validated every boot: Hermes 0.22 migrated
+ * profile-scoped plugins to the app-level root, and a stale cache would
+ * point the bundled-pack scan at a folder that no longer exists.
+ */
 async function resolveSelfDir() {
   if (selfDirCache) return selfDirCache;
   const cached = storageGet('selfDir', null);
   if (typeof cached === 'string' && cached) {
-    selfDirCache = cached;
-    return cached;
+    if (await dirContainsPluginId(cached)) {
+      selfDirCache = cached;
+      return cached;
+    }
+    storageSet('selfDir', null); // stale — the plugin moved; rescan below
   }
   const d = desktop();
   const root = await d?.desktopPluginsRoot?.().catch?.(() => null);
@@ -479,15 +499,10 @@ async function resolveSelfDir() {
   const { entries } = await fsReadDir(root);
   for (const entry of entries ?? []) {
     if (!entry.isDirectory) continue;
-    try {
-      const res = await d.readFileText(`${entry.path}/plugin.js`);
-      if (!res.binary && new RegExp(`["']${PLUGIN_ID}["']`).test(res.text)) {
-        selfDirCache = entry.path;
-        storageSet('selfDir', entry.path);
-        return entry.path;
-      }
-    } catch {
-      /* not our folder */
+    if (await dirContainsPluginId(entry.path)) {
+      selfDirCache = entry.path;
+      storageSet('selfDir', entry.path);
+      return entry.path;
     }
   }
   return null;
@@ -981,6 +996,9 @@ export const __engine = {
   BUILTIN_THEME_NAMES,
   get selfDir() {
     return selfDirCache;
+  },
+  set selfDir(value) {
+    selfDirCache = value;
   },
 };
 
