@@ -276,19 +276,31 @@ function findPackForAppliedTheme(appliedName) {
 
 let lastWallpaperLog = '';
 
-/** One-line state dump for the desktop log (renderer console is captured there). */
+/** One-line state dump for the desktop log (only console.error is captured there). */
 function logWallpaperState(applied, record) {
   try {
     const key = `${applied}|${record?.theme?.name ?? '-'}|${record?.theme?.wallpaper ? 'wall' : 'none'}`;
     if (key === lastWallpaperLog) return;
     lastWallpaperLog = key;
     const packs = packsAtom.get?.() ?? [];
-    console.info(
+    const line =
       `[theme-forge] sync: applied=${JSON.stringify(applied)} packs=${packs.length}` +
       ` (${packs.map((p) => `${p.theme?.name ?? '?'}:${p.error ?? 'ok'}${p.theme?.wallpaper?.image ? '+img' : ''}`).join(',')})` +
       ` selfDir=${selfDirCache ?? 'null'} wallpaper=${record?.theme?.wallpaper ? 'on' : 'off'}` +
-      ` attr=${document.documentElement?.dataset?.hermesWallpaper ?? 'unset'}`,
-    );
+      ` attr=${document.documentElement?.dataset?.hermesWallpaper ?? 'unset'}`;
+    console.error(line);
+    const d = desktop();
+    if (selfDirCache && d?.writeTextFile) {
+      d.writeTextFile(`${selfDirCache}/diag.json`, JSON.stringify({
+        at: new Date().toISOString(),
+        line,
+        packs: packs.map((p) => ({
+          name: p.theme?.name, error: p.error, warnings: p.warnings,
+          source: p.source, imageLen: p.theme?.wallpaper?.image?.length ?? 0,
+        })),
+        applied, attr: document.documentElement?.dataset?.hermesWallpaper ?? null,
+      }, null, 2)).catch(() => {});
+    }
   } catch {
     /* diagnostics never break the host */
   }
