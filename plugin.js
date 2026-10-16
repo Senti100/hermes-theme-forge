@@ -230,9 +230,17 @@ function injectWallpaperCss() {
   }
 }
 
+/**
+ * Wrap an image reference for the --dt-wallpaper-image custom property.
+ * ONLY url( and CSS gradient functions survive as raw values — everything
+ * else (data: URLs, https://, file paths) MUST be wrapped in url("…").
+ * A raw `data:image/webp;base64,…` contains a semicolon, which terminates
+ * the declaration and silently drops the whole property.
+ */
 function wrapImageValue(value) {
   const s = String(value ?? '').trim();
-  if (!s || isPassthroughImageRef(s)) return s || 'none';
+  if (!s || s === 'none') return s || 'none';
+  if (/^(url\(|linear-gradient\(|radial-gradient\(|conic-gradient\()/i.test(s)) return s;
   return `url("${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}")`;
 }
 
@@ -1033,6 +1041,7 @@ export const __engine = {
   syncWallpaperToAppliedTheme,
   setWallpaperVars,
   clearWallpaperVars,
+  wrapImageValue,
   pickOpenPath,
   pickSavePath,
   describeSource,
