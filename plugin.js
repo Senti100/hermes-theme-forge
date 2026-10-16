@@ -274,6 +274,26 @@ function findPackForAppliedTheme(appliedName) {
   );
 }
 
+let lastWallpaperLog = '';
+
+/** One-line state dump for the desktop log (renderer console is captured there). */
+function logWallpaperState(applied, record) {
+  try {
+    const key = `${applied}|${record?.theme?.name ?? '-'}|${record?.theme?.wallpaper ? 'wall' : 'none'}`;
+    if (key === lastWallpaperLog) return;
+    lastWallpaperLog = key;
+    const packs = packsAtom.get?.() ?? [];
+    console.info(
+      `[theme-forge] sync: applied=${JSON.stringify(applied)} packs=${packs.length}` +
+      ` (${packs.map((p) => `${p.theme?.name ?? '?'}:${p.error ?? 'ok'}${p.theme?.wallpaper?.image ? '+img' : ''}`).join(',')})` +
+      ` selfDir=${selfDirCache ?? 'null'} wallpaper=${record?.theme?.wallpaper ? 'on' : 'off'}` +
+      ` attr=${document.documentElement?.dataset?.hermesWallpaper ?? 'unset'}`,
+    );
+  } catch {
+    /* diagnostics never break the host */
+  }
+}
+
 /** Point the wallpaper layers at the currently applied pack theme (or clear). */
 function syncWallpaperToAppliedTheme() {
   if (typeof document === 'undefined') return;
@@ -281,6 +301,7 @@ function syncWallpaperToAppliedTheme() {
     const applied = document.documentElement?.dataset?.hermesTheme ?? '';
     const record = findPackForAppliedTheme(applied);
     const wall = record?.theme?.wallpaper;
+    logWallpaperState(applied, record);
     if (wall && typeof wall === 'object') {
       setWallpaperVars(wall);
       document.documentElement.dataset.hermesWallpaper = 'true';
