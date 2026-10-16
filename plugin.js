@@ -287,7 +287,9 @@ function logWallpaperState(applied, record) {
       `[theme-forge] sync: applied=${JSON.stringify(applied)} packs=${packs.length}` +
       ` (${packs.map((p) => `${p.theme?.name ?? '?'}:${p.error ?? 'ok'}${p.theme?.wallpaper?.image ? '+img' : ''}`).join(',')})` +
       ` selfDir=${selfDirCache ?? 'null'} wallpaper=${record?.theme?.wallpaper ? 'on' : 'off'}` +
-      ` attr=${document.documentElement?.dataset?.hermesWallpaper ?? 'unset'}`;
+      ` attr=${document.documentElement?.dataset?.hermesWallpaper ?? 'unset'}` +
+      ` styleTag=${document.getElementById(WALLPAPER_STYLE_ID) ? 'yes' : 'NO'}` +
+      ` computedImage=${String(getComputedStyle(document.documentElement).getPropertyValue('--dt-wallpaper-image')).slice(0, 40)}`;
     console.error(line);
     const d = desktop();
     if (selfDirCache && d?.writeTextFile) {
@@ -313,7 +315,6 @@ function syncWallpaperToAppliedTheme() {
     const applied = document.documentElement?.dataset?.hermesTheme ?? '';
     const record = findPackForAppliedTheme(applied);
     const wall = record?.theme?.wallpaper;
-    logWallpaperState(applied, record);
     if (wall && typeof wall === 'object') {
       setWallpaperVars(wall);
       document.documentElement.dataset.hermesWallpaper = 'true';
@@ -321,6 +322,7 @@ function syncWallpaperToAppliedTheme() {
       clearWallpaperVars();
       delete document.documentElement.dataset.hermesWallpaper;
     }
+    logWallpaperState(applied, record);
   } catch {
     /* never break the host */
   }
