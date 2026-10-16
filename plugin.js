@@ -277,9 +277,9 @@ function findPackForAppliedTheme(appliedName) {
 let lastWallpaperLog = '';
 
 /** One-line state dump for the desktop log (only console.error is captured there). */
-function logWallpaperState(applied, record) {
+function logWallpaperState(applied, record, inlineProbe) {
   try {
-    const key = `${applied}|${record?.theme?.name ?? '-'}|${record?.theme?.wallpaper ? 'wall' : 'none'}`;
+    const key = `${applied}|${record?.theme?.name ?? '-'}|${record?.theme?.wallpaper ? 'wall' : 'none'}|${inlineProbe ?? ''}`;
     if (key === lastWallpaperLog) return;
     lastWallpaperLog = key;
     const packs = packsAtom.get?.() ?? [];
@@ -288,6 +288,7 @@ function logWallpaperState(applied, record) {
       ` (${packs.map((p) => `${p.theme?.name ?? '?'}:${p.error ?? 'ok'}${p.theme?.wallpaper?.image ? '+img' : ''}`).join(',')})` +
       ` selfDir=${selfDirCache ?? 'null'} wallpaper=${record?.theme?.wallpaper ? 'on' : 'off'}` +
       ` attr=${document.documentElement?.dataset?.hermesWallpaper ?? 'unset'}` +
+      ` inline=${inlineProbe ?? 'n/a'}` +
       ` styleTag=${document.getElementById(WALLPAPER_STYLE_ID) ? 'yes' : 'NO'}` +
       ` computedImage=${String(getComputedStyle(document.documentElement).getPropertyValue('--dt-wallpaper-image')).slice(0, 40)}`;
     console.error(line);
@@ -322,9 +323,19 @@ function syncWallpaperToAppliedTheme() {
       clearWallpaperVars();
       delete document.documentElement.dataset.hermesWallpaper;
     }
-    logWallpaperState(applied, record);
+    logWallpaperState(applied, record, probeInlineWallpaper());
   } catch {
     /* never break the host */
+  }
+}
+
+/** Verify the inline var actually stuck right after setWallpaperVars. */
+function probeInlineWallpaper() {
+  try {
+    const inline = document.documentElement.style.getPropertyValue('--dt-wallpaper-image');
+    return `${inline ? `len=${inline.length}` : 'EMPTY'}`;
+  } catch {
+    return 'probe-failed';
   }
 }
 
