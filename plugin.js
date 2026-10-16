@@ -190,6 +190,11 @@ const WALLPAPER_CSS = `
 :root[data-hermes-wallpaper=true] #root:before{z-index:0;background-image:var(--dt-wallpaper-image);background-position:var(--dt-wallpaper-position);background-repeat:no-repeat;background-size:var(--dt-wallpaper-size);filter:var(--dt-wallpaper-filter);opacity:var(--dt-wallpaper-opacity);transform:scale(var(--dt-wallpaper-scale));transform-origin:50%}
 :root[data-hermes-wallpaper=true] #root:after{z-index:0;background:var(--dt-wallpaper-overlay);-webkit-backdrop-filter:var(--dt-wallpaper-front-filter);backdrop-filter:var(--dt-wallpaper-front-filter)}
 :root[data-hermes-wallpaper=true] #root>*{z-index:1;position:relative}
+/* The first-run intro paints ds-assets/filler-bg0.jpg (a blue etching) as a
+   full-viewport mix-blend-difference layer at z-2 — above the wallpaper
+   layers. With a pack wallpaper active it reads as a stray blue texture,
+   so it yields to the wallpaper. */
+:root[data-hermes-wallpaper=true] div.mix-blend-difference:has(>img[src*="filler-bg0"]){display:none}
 `;
 
 /** Pack surface keys → the CSS variables the app chrome consumes. */
